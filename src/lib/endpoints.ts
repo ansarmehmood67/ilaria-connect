@@ -9,6 +9,6 @@ export const ENDPOINTS = {
 } as const;
 
 export function getBackendUrl(path: string): string {
-  const baseUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+  const baseUrl = import.meta.env.VITE_BACKEND_URL || "https://ea4a5c02815a.ngrok-free.app";
   return new URL(path, baseUrl).toString();
 }
