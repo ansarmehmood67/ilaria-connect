@@ -2,6 +2,7 @@
  * Backend endpoint mapping - edit these paths to match your Django routes
  */
 export const ENDPOINTS = {
+  start: "/api/chat/start",        // POST  -> {session_id, reply}
   chat: "/api/chat/msg",           // POST  -> {text:string, session_id?:string}
   escalate: "/api/escalate/",      // POST  -> {session_id, reason, transcript}
   health: "/health/",              // GET   -> 200 OK (optional)

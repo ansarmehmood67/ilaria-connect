@@ -20,17 +20,12 @@ import { detectLocale, translations, t, type Locale } from "@/lib/lang";
 import type { Message } from "@/lib/chatClient";
 
 export default function SupportChat() {
+  const SID_KEY = "chat_session_id";
   const [locale, setLocale] = useState<Locale>(detectLocale());
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [sessionId] = useState(() => {
-    const stored = localStorage.getItem("chat_session_id");
-    if (stored) return stored;
-    const newId = crypto.randomUUID();
-    localStorage.setItem("chat_session_id", newId);
-    return newId;
-  });
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [showEscalateDialog, setShowEscalateDialog] = useState(false);
   const [showHealthCheck, setShowHealthCheck] = useState(false);
   const [healthStatus, setHealthStatus] = useState<{ ok: boolean; error?: string } | null>(null);
@@ -38,31 +33,48 @@ export default function SupportChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Initial greeting
+  // Ensure we have a server session id and first message
   useEffect(() => {
-    if (messages.length === 0) {
-      const greeting: Message = {
-        role: "assistant",
-        content: t(locale, "greeting"),
-        timestamp: Date.now(),
-      };
-      setMessages([greeting]);
+    let mounted = true;
+
+    async function ensureSidAndGreeting() {
+      // 1) Reuse sid if we already have one
+      let sid = localStorage.getItem(SID_KEY);
+      if (!sid) {
+        // 2) Ask backend to start a session (gets server sid + first reply)
+        const start = await chatClient.start();
+        sid = start.session_id;
+        localStorage.setItem(SID_KEY, sid);
+        if (mounted && start?.reply) {
+          setMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: start.reply, timestamp: Date.now() },
+          ]);
+        }
+      }
+      if (mounted) setSessionId(sid);
     }
-  }, []);
+
+    if (!sessionId) ensureSidAndGreeting();
+
+    return () => {
+      mounted = false;
+    };
+  }, [sessionId]);
 
   // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Detect language switching
+  // Detect language switching (tolerant of typos)
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     if (lastMessage?.role === "user") {
       const content = lastMessage.content.toLowerCase();
-      if (content.includes("english") || content.includes("inglese")) {
+      if (/\b(english|inglese|engl\w*)\b/i.test(content)) {
         if (locale !== "en") setLocale("en");
-      } else if (content.includes("italiano") || content.includes("italian")) {
+      } else if (/\b(italian|italiano|ital\w*)\b/i.test(content)) {
         if (locale !== "it") setLocale("it");
       }
     }
@@ -70,6 +82,23 @@ export default function SupportChat() {
 
   const sendMessage = async (content: string) => {
     if (!content.trim()) return;
+
+    const SID_KEY = "chat_session_id";
+
+    // Make sure we have a server session id
+    let sid = sessionId || localStorage.getItem(SID_KEY);
+    if (!sid) {
+      const start = await chatClient.start();
+      sid = start.session_id;
+      localStorage.setItem(SID_KEY, sid);
+      setSessionId(sid);
+      if (start?.reply) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: start.reply, timestamp: Date.now() },
+        ]);
+      }
+    }
 
     const userMessage: Message = {
       role: "user",
@@ -84,45 +113,39 @@ export default function SupportChat() {
     try {
       const response = await chatClient.askBackend({
         message: content.trim(),
-        sessionId,
+        sessionId: sid!,
         locale,
       });
 
-      // Simulate typing delay for better UX
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((r) => setTimeout(r, 800));
 
       if (response.error) {
-        const errorMessage: Message = {
-          role: "system",
-          content: `error:${response.error}`,
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, errorMessage]);
+        setMessages((prev) => [
+          ...prev,
+          { role: "system", content: `error:${response.error}`, timestamp: Date.now() },
+        ]);
       } else {
-        const assistantMessage: Message = {
-          role: "assistant",
-          content: response.reply,
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, assistantMessage]);
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: response.reply, timestamp: Date.now() },
+        ]);
 
-        // Add suggestions as quick replies
-        if (response.suggestions && response.suggestions.length > 0) {
-          const suggestionsMessage: Message = {
-            role: "system",
-            content: `suggestions:${JSON.stringify(response.suggestions)}`,
-            timestamp: Date.now(),
-          };
-          setMessages((prev) => [...prev, suggestionsMessage]);
+        if (response.suggestions?.length) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content: `suggestions:${JSON.stringify(response.suggestions)}`,
+              timestamp: Date.now(),
+            },
+          ]);
         }
       }
-    } catch (error) {
-      const errorMessage: Message = {
-        role: "system",
-        content: "error:unknown_error",
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+    } catch (e) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "system", content: "error:unknown_error", timestamp: Date.now() },
+      ]);
     } finally {
       setIsTyping(false);
     }

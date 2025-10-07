@@ -40,6 +40,41 @@ export class ChatClient {
   }
 
   /**
+   * Start a new chat session and get initial greeting
+   */
+  async start(): Promise<{ session_id: string; reply: string }> {
+    try {
+      const url = getBackendUrl(ENDPOINTS.start);
+      
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      return {
+        session_id: data.session_id || crypto.randomUUID(),
+        reply: data.reply || data.message || "Hello! How can I help you today?",
+      };
+    } catch (error) {
+      console.error("Start session error:", error);
+      // Fallback to client-side session
+      return {
+        session_id: crypto.randomUUID(),
+        reply: "Hello! How can I help you today?",
+      };
+    }
+  }
+
+  /**
    * Send a chat message to the backend
    * Supports both simple {message} and {messages:[]} formats
    */
