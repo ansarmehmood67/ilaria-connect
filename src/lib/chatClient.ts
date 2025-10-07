@@ -47,22 +47,24 @@ export class ChatClient {
     try {
       const url = getBackendUrl(ENDPOINTS.chat);
       
-      // Build request body - support both formats
+      // Build request body matching Django backend format
       const body: any = {
         session_id: request.sessionId,
-        locale: request.locale,
       };
       
       if (request.messages && request.messages.length > 0) {
-        body.messages = request.messages;
+        // If messages array provided, send the last user message as 'text'
+        const lastUserMsg = request.messages.filter(m => m.role === 'user').pop();
+        body.text = lastUserMsg?.content || request.message || "";
       } else if (request.message) {
-        body.message = request.message;
+        body.text = request.message;
       }
 
       const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
         },
         body: JSON.stringify(body),
       });
