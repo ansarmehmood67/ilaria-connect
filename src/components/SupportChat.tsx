@@ -215,15 +215,6 @@ export default function SupportChat() {
             </div>
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setShowEscalateDialog(true)}
-          className="text-xs"
-        >
-          <User className="mr-1.5 h-3.5 w-3.5" />
-          {t(locale, "escalate")}
-        </Button>
       </header>
 
       {/* Messages */}
