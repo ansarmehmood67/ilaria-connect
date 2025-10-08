@@ -62,7 +62,7 @@ export const translations = {
     agentName: "Ilaria",
     agentRole: "Compliance Assistant",
     online: "Online",
-    slaInfo: "I respond in seconds",
+    slaInfo: "Assistenza immediata e professionale",
     escalate: "Talk to a human",
     
     // Messages
