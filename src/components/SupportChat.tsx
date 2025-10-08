@@ -16,11 +16,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { chatClient } from "@/lib/chatClient";
-import { detectLocale, translations, t, type Locale } from "@/lib/lang";
+import { detectLocale, t, type Locale } from "@/lib/lang";
 import type { Message } from "@/lib/chatClient";
 
 export default function SupportChat() {
-  const SID_KEY = "chat_session_id";
+  // IMPORTANT: no persistent storage — in-memory only
   const [locale, setLocale] = useState<Locale>(detectLocale());
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -29,75 +29,54 @@ export default function SupportChat() {
   const [showEscalateDialog, setShowEscalateDialog] = useState(false);
   const [showHealthCheck, setShowHealthCheck] = useState(false);
   const [healthStatus, setHealthStatus] = useState<{ ok: boolean; error?: string } | null>(null);
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Ensure we have a server session id and first message
+  // Create a fresh server session for THIS tab lifetime.
   useEffect(() => {
     let mounted = true;
-
-    async function ensureSidAndGreeting() {
-      // 1) Reuse sid if we already have one
-      let sid = localStorage.getItem(SID_KEY);
-      if (!sid) {
-        // 2) Ask backend to start a session (gets server sid + first reply)
-        const start = await chatClient.start();
-        sid = start.session_id;
-        localStorage.setItem(SID_KEY, sid);
-        if (mounted && start?.reply) {
-          setMessages((prev) => [
-            ...prev,
-            { role: "assistant", content: start.reply, timestamp: Date.now() },
-          ]);
-        }
+    (async () => {
+      try {
+        const start = await chatClient.start(); // now returns only { session_id }
+        if (mounted && start?.session_id) setSessionId(start.session_id);
+      } catch {
+        // optional: show a soft system error
       }
-      if (mounted) setSessionId(sid);
-    }
-
-    if (!sessionId) ensureSidAndGreeting();
-
+    })();
     return () => {
       mounted = false;
     };
-  }, [sessionId]);
+  }, []);
 
   // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Detect language switching (tolerant of typos)
+  // Language auto-switch on last user message
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     if (lastMessage?.role === "user") {
-      const content = lastMessage.content.toLowerCase();
+      const content = (lastMessage.content || "").toLowerCase();
       if (/\b(english|inglese|engl\w*)\b/i.test(content)) {
         if (locale !== "en") setLocale("en");
       } else if (/\b(italian|italiano|ital\w*)\b/i.test(content)) {
         if (locale !== "it") setLocale("it");
       }
     }
-  }, [messages]);
+  }, [messages, locale]);
 
   const sendMessage = async (content: string) => {
     if (!content.trim()) return;
 
-    const SID_KEY = "chat_session_id";
-
-    // Make sure we have a server session id
-    let sid = sessionId || localStorage.getItem(SID_KEY);
+    // Ensure session exists (in-memory only)
+    let sid = sessionId;
     if (!sid) {
       const start = await chatClient.start();
       sid = start.session_id;
-      localStorage.setItem(SID_KEY, sid);
       setSessionId(sid);
-      if (start?.reply) {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: start.reply, timestamp: Date.now() },
-        ]);
-      }
+      // DO NOT push any assistant message here — intro comes after the user's message
     }
 
     const userMessage: Message = {
@@ -117,7 +96,8 @@ export default function SupportChat() {
         locale,
       });
 
-      await new Promise((r) => setTimeout(r, 800));
+      // small delay for nicer UX
+      await new Promise((r) => setTimeout(r, 400));
 
       if (response.error) {
         setMessages((prev) => [
@@ -141,7 +121,7 @@ export default function SupportChat() {
           ]);
         }
       }
-    } catch (e) {
+    } catch {
       setMessages((prev) => [
         ...prev,
         { role: "system", content: "error:unknown_error", timestamp: Date.now() },
@@ -162,7 +142,6 @@ export default function SupportChat() {
 
   const handleEscalate = async () => {
     setShowEscalateDialog(false);
-    
     try {
       const result = await chatClient.escalate({
         sessionId,
@@ -171,19 +150,19 @@ export default function SupportChat() {
       });
 
       if (result.success) {
-        const escalatedMessage: Message = {
-          role: "system",
-          content: t(locale, "escalated"),
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, escalatedMessage]);
+        setMessages((prev) => [
+          ...prev,
+          { role: "system", content: t(locale, "escalated"), timestamp: Date.now() },
+        ]);
       } else {
-        const errorMessage: Message = {
-          role: "system",
-          content: `error:${result.error || "unknown_error"}`,
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, errorMessage]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `error:${result.error || "unknown_error"}`,
+            timestamp: Date.now(),
+          },
+        ]);
       }
     } catch (error) {
       console.error("Escalation error:", error);
@@ -206,8 +185,8 @@ export default function SupportChat() {
   const retryLastMessage = () => {
     const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
     if (lastUserMessage) {
-      // Remove error message
-      setMessages((prev) => prev.filter((m) => m !== prev[prev.length - 1]));
+      // Remove last (error) message
+      setMessages((prev) => prev.slice(0, -1));
       sendMessage(lastUserMessage.content);
     }
   };
@@ -258,9 +237,9 @@ export default function SupportChat() {
             onRetry={retryLastMessage}
           />
         ))}
-        
+
         {isTyping && <TypingIndicator />}
-        
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -350,7 +329,6 @@ export default function SupportChat() {
   );
 }
 
-// Message Bubble Component
 function MessageBubble({
   message,
   locale,
@@ -362,19 +340,15 @@ function MessageBubble({
   onQuickReply: (text: string) => void;
   onRetry: () => void;
 }) {
-  // Handle special system messages
   if (message.role === "system") {
     if (message.content.startsWith("error:")) {
       const errorCode = message.content.replace("error:", "");
       return <ErrorBubble errorCode={errorCode} locale={locale} onRetry={onRetry} />;
     }
-    
     if (message.content.startsWith("suggestions:")) {
       const suggestions = JSON.parse(message.content.replace("suggestions:", ""));
       return <QuickReplies suggestions={suggestions} onSelect={onQuickReply} />;
     }
-    
-    // Regular system message
     return (
       <div className="flex justify-center">
         <div className="rounded-full bg-muted px-4 py-2 text-xs text-muted-foreground max-w-md text-center">
@@ -385,7 +359,6 @@ function MessageBubble({
   }
 
   const isUser = message.role === "user";
-  
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} animate-in slide-in-from-bottom-2`}>
       <div
@@ -411,7 +384,6 @@ function MessageBubble({
   );
 }
 
-// Error Bubble Component
 function ErrorBubble({
   errorCode,
   locale,
@@ -429,7 +401,6 @@ function ErrorBubble({
     invalid_api_key: t(locale, "errorBilling"),
     unknown_error: t(locale, "errorUnknown"),
   };
-
   const errorMessage = errorMessages[errorCode] || t(locale, "errorUnknown");
 
   return (
@@ -440,12 +411,7 @@ function ErrorBubble({
           <div className="flex-1 space-y-2">
             <p className="text-sm font-medium text-destructive">{t(locale, "errorTitle")}</p>
             <p className="text-xs text-muted-foreground">{errorMessage}</p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onRetry}
-              className="h-7 text-xs"
-            >
+            <Button variant="outline" size="sm" onClick={onRetry} className="h-7 text-xs">
               <RefreshCw className="mr-1.5 h-3 w-3" />
               {t(locale, "retry")}
             </Button>
@@ -456,7 +422,6 @@ function ErrorBubble({
   );
 }
 
-// Quick Replies Component
 function QuickReplies({
   suggestions,
   onSelect,
@@ -465,25 +430,23 @@ function QuickReplies({
   onSelect: (text: string) => void;
 }) {
   if (!suggestions || suggestions.length === 0) return null;
-
   return (
     <div className="flex flex-wrap gap-2 justify-start animate-in slide-in-from-bottom-2">
-      {suggestions.map((suggestion, index) => (
+      {suggestions.map((s, i) => (
         <Button
-          key={index}
+          key={i}
           variant="outline"
           size="sm"
-          onClick={() => onSelect(suggestion)}
+          onClick={() => onSelect(s)}
           className="h-8 rounded-full text-xs hover:bg-accent hover:text-accent-foreground transition-all hover:scale-105"
         >
-          {suggestion}
+          {s}
         </Button>
       ))}
     </div>
   );
 }
 
-// Typing Indicator Component
 function TypingIndicator() {
   return (
     <div className="flex justify-start animate-in slide-in-from-bottom-2">
