@@ -10,6 +10,6 @@ export const ENDPOINTS = {
 } as const;
 
 export function getBackendUrl(path: string): string {
-  const baseUrl = import.meta.env.VITE_BACKEND_URL || "https://c67a41fd5d9d.ngrok-free.app";
+  const baseUrl = import.meta.env.VITE_BACKEND_URL || "https://forest-auctions-public-auctions.trycloudflare.com";
   return new URL(path, baseUrl).toString();
 }
